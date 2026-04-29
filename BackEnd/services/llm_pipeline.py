@@ -1,11 +1,10 @@
 from BackEnd.core.logger import get_logger
 from BackEnd.models.schemas import AnalysisResult
-from BackEnd.core.config import client
-from BackEnd.prompts.prompts import MAIN_PROMPT, LEVEL1_PROMPT, LEVEL2_PROMPT
-import json
+from BackEnd.services.llm_manager import LLMManager
+from BackEnd.prompts import MAIN_PROMPT, LEVEL1_PROMPT, LEVEL2_PROMPT
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 import time
-import re
-import ast
 
 logger = get_logger(__name__)
 
@@ -17,30 +16,13 @@ async def generate_main_summary(content: str) -> AnalysisResult:
     start = time.time()
 
     try:
-        prompt = MAIN_PROMPT.format(content=content[:8000])
+        llm = LLMManager().get_llm()
+        parser = JsonOutputParser(pydantic_object=AnalysisResult)
 
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt
-        )
+        prompt = ChatPromptTemplate.from_template(MAIN_PROMPT)
+        chain = prompt | llm | parser
 
-        text = response.output[0].content[0].text.strip()
-        print("RAW STAGE1:\n", text)
-
-        # clean markdown
-        text = re.sub(r"```json|```", "", text).strip()
-
-        # extract JSON
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            raise ValueError("No JSON found in Stage 1")
-
-        json_str = match.group(0)
-
-        try:
-            data = json.loads(json_str)
-        except:
-            data = ast.literal_eval(json_str)
+        data = await chain.ainvoke({"content": content[:8000]})
         result = AnalysisResult(**data)
 
         logger.info(f"Stage 1 done in {time.time() - start:.2f}s")
@@ -60,37 +42,16 @@ async def rewrite_summary(summary: AnalysisResult, level: str) -> AnalysisResult
     start = time.time()
 
     try:
-        summary_str = json.dumps(summary.model_dump(), ensure_ascii=False)
-        summary_str = summary_str.replace("{", "{{").replace("}", "}}")
+        llm = LLMManager().get_llm()
+        parser = JsonOutputParser(pydantic_object=AnalysisResult)
 
         level = (level or "").lower()
+        prompt_text = LEVEL1_PROMPT if level == "level1" else LEVEL2_PROMPT
 
-        if level == "level1":
-            prompt_template = LEVEL1_PROMPT
-        else:
-            prompt_template = LEVEL2_PROMPT
+        prompt = ChatPromptTemplate.from_template(prompt_text)
+        chain = prompt | llm | parser
 
-        prompt = prompt_template.replace("{content}", summary_str)
-
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt
-        )
-
-        text = response.output[0].content[0].text.strip()
-        print("RAW STAGE2:\n", text)
-
-        # clean markdown
-        text = re.sub(r"```json|```", "", text).strip()
-
-        # extract JSON
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-
-        if not match:
-            raise ValueError("No JSON found in Stage 2")
-
-        data = json.loads(match.group(0))
-
+        data = await chain.ainvoke({"content": summary.model_dump_json()})
         result = AnalysisResult(**data)
 
         logger.info(f"Stage 2 done in {time.time() - start:.2f}s")
@@ -98,5 +59,4 @@ async def rewrite_summary(summary: AnalysisResult, level: str) -> AnalysisResult
 
     except Exception:
         logger.exception("Stage 2 failed")
-
         return summary

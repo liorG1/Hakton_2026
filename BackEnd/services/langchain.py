@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from typing import List
 import json
 
-from ..prompts import ANXIETY_PROMPT, PTSD_PROMPT
+from ..prompts import LEVEL2_PROMPT, LEVEL1_PROMPT
 from .llm_manager import LLMManager
 
 
@@ -25,7 +25,7 @@ class AnalysisResult(BaseModel):
 # ✅ Internal helper
 # ----------------------
 def _get_prompt(disability: str):
-    return ANXIETY_PROMPT if disability.lower() == "anxiety" else PTSD_PROMPT
+    return LEVEL2_PROMPT if "level2" in disability.lower() else LEVEL1_PROMPT
 
 
 # ----------------------
@@ -69,7 +69,7 @@ async def process_url_for_disability(content: str, disability: str):
 # ----------------------
 # ✅ Streaming version (used by FastAPI)
 # ----------------------
-async def stream_url_for_disability(content: str, disability: str):
+async def stream_url_for_disability(summary: str, disability: str):
     prompt_text = _get_prompt(disability)
 
     try:
@@ -79,7 +79,7 @@ async def stream_url_for_disability(content: str, disability: str):
         prompt = ChatPromptTemplate.from_template(prompt_text)
         chain = prompt | llm | parser
 
-        async for chunk in chain.astream({"content": content}):
+        async for chunk in chain.astream({"content": summary}):
             if chunk:
                 yield chunk
 

@@ -7,7 +7,7 @@ import time
 
 from BackEnd.services.scrapper import process_url
 from BackEnd.services.langchain import stream_url_for_disability
-
+from BackEnd.services.llm_pipeline import generate_main_summary
 from BackEnd.core.logger import setup_logger, get_logger
 
 # ✅ setup logger ONCE
@@ -56,20 +56,24 @@ async def analyze(request: AnalyzeRequest):
             sections = scraped.get("sections", [])
             content = "\n".join([s.get("text", "") for s in sections])
 
+            summary = await generate_main_summary(content)
+            
+            logger.info(f"Summary generated: {summary.title}")
+
             logger.info(f"Scraping done | sections={len(sections)}")
 
-            if not content:
-                logger.warning("No content extracted")
+            if not summary:
+                logger.warning("No summary extracted")
                 yield json.dumps({"type": "error", "message": "לא נמצא תוכן."}) + "\n"
                 return
 
             # 🔹 STATUS 2
             yield json.dumps({"type": "status", "message": "מנתח את התוכן..."}) + "\n"
 
-            logger.info(f"Content length={len(content)}")
+            logger.info(f"Summary generated: {summary.title}")
 
             # 🔹 STREAM LLM
-            async for chunk in stream_url_for_disability(content, request.disability):
+            async for chunk in stream_url_for_disability(summary.model_dump_json(), request.disability):
                 yield json.dumps({
                     "type": "data",
                     "chunk": chunk
