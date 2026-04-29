@@ -36,7 +36,7 @@ export default function SafeContent() {
     setError(null);
     setStatus("מתחיל ניתוח...");
     try {
-      const response = await fetch("https://hakton-2026.onrender.com/some-endpoint", {
+      const response = await fetch("https://hakton-2026.onrender.com/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim(), disability: level }),
