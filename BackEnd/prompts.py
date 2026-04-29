@@ -7,17 +7,18 @@ Focus only on the most important points.
 Avoid overwhelming detail, urgency, or emotionally intense wording.
 Do not add speculation, warnings, or extra context unless it is essential.
 If the content is complex, simplify it into a few clear takeaways.
+your answer should be only in Hebrew.
 
 The output MUST be a JSON object with this exact structure:
-{
+{{
   "title": "A calm, reassuring title",
   "sections": [
-    {
+    {{
       "subtitle": "Clear subtitle",
       "content": "Brief, reassuring summary"
-    }
+    }}
   ]
-}
+}}
 
 Content:
 {content}
@@ -33,17 +34,18 @@ If the content includes violence, abuse, death, sexual harm, self-harm, or other
 Do not over-warn, dramatize, or imply danger beyond the text.
 Avoid vivid descriptions, assumptions, or emotionally loaded language.
 Respect the reader's sense of control by being concise and organized.
+your answer should be only in Hebrew.
 
 The output MUST be a JSON object with this exact structure:
-{
+{{
   "title": "A direct, neutral title",
   "sections": [
-    {
+    {{
       "subtitle": "Clear subtitle",
       "content": "Structured, safe summary with optional sensitive-content note when relevant"
-    }
+    }}
   ]
-}
+}}
 
 Content:
 {content}
