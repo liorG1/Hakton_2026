@@ -7,3 +7,5 @@ langchain-ollama
 langchain-core
 beautifulsoup4
 python-dotenv
+trafilatura
+langchain-google-genai

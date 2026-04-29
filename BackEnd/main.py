@@ -1,17 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
+import json
 import time
 
 from BackEnd.services.scrapper import process_url
-from BackEnd.services.llm_pipeline import generate_main_summary, rewrite_summary
+from BackEnd.services.langchain import stream_url_for_disability
 
 from BackEnd.core.logger import setup_logger, get_logger
-from BackEnd.models.schemas import AnalyzeRequest
 
 # ✅ setup logger ONCE
 setup_logger()
 logger = get_logger("api")
+
+
+# ✅ unified request model
+class AnalyzeRequest(BaseModel):
+    url: HttpUrl
+    disability: str
 
 
 app = FastAPI()
@@ -36,46 +43,53 @@ async def root():
 async def analyze(request: AnalyzeRequest):
     start = time.time()
 
-    logger.info(f"Received request | url={request.url} | level={request.level}")
+    logger.info(f"Received request | url={request.url} | disability={request.disability}")
 
-    try:
-        # ---------- SCRAPER ----------
-        logger.info("Starting scraping...")
-        scraped = await process_url(str(request.url))
+    async def event_generator():
+        try:
+            # 🔹 STATUS 1
+            yield json.dumps({"type": "status", "message": "מנתח את הקישור..."}) + "\n"
 
-        sections = scraped.get("sections", [])
-        logger.info(f"Scraping done | sections={len(sections)}")
+            logger.info("Starting scraping...")
+            scraped = await process_url(str(request.url))
 
-        content = "\n".join([s.get("text", "") for s in sections])
+            sections = scraped.get("sections", [])
+            content = "\n".join([s.get("text", "") for s in sections])
 
-        if not content:
-            logger.warning("No content extracted after scraping")
-            return {"title": "No content", "sections": []}
+            logger.info(f"Scraping done | sections={len(sections)}")
 
-        logger.info(f"Content prepared | length={len(content)}")
+            if not content:
+                logger.warning("No content extracted")
+                yield json.dumps({"type": "error", "message": "לא נמצא תוכן."}) + "\n"
+                return
 
-        # ---------- STAGE 1 ----------
-        logger.info("LLM stage 1 (MAIN)...")
-        summary = await generate_main_summary(content)
+            # 🔹 STATUS 2
+            yield json.dumps({"type": "status", "message": "מנתח את התוכן..."}) + "\n"
 
-        # ---------- STAGE 2 ----------
-        logger.info("LLM stage 2 (REWRITE)...")
-        final = await rewrite_summary(summary, request.level)
+            logger.info(f"Content length={len(content)}")
 
-        logger.info("Pipeline finished")
+            # 🔹 STREAM LLM
+            async for chunk in stream_url_for_disability(content, request.disability):
+                yield json.dumps({
+                    "type": "data",
+                    "chunk": chunk
+                }) + "\n"
 
-        return final
+            # 🔹 END
+            yield json.dumps({"type": "end"}) + "\n"
 
-    except Exception as e:
-        logger.exception("Analyze endpoint failed")
+            logger.info("Streaming completed successfully")
 
-        return {
-            "title": "Internal Error",
-            "sections": [
-                {"subtitle": "Error", "content": str(e)}
-            ]
-        }
+        except Exception as e:
+            logger.exception("Analyze endpoint failed")
 
-    finally:
-        elapsed = time.time() - start
-        logger.info(f"Request completed in {elapsed:.2f}s")
+            yield json.dumps({
+                "type": "error",
+                "message": f"שגיאה: {str(e)}"
+            }) + "\n"
+
+        finally:
+            elapsed = time.time() - start
+            logger.info(f"Request completed in {elapsed:.2f}s")
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")

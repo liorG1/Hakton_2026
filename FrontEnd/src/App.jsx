@@ -4,8 +4,11 @@ export default function SafeContent() {
   const [level, setLevel] = useState("level1");
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [status, setStatus] = useState("");
+  const [result, setResult] = useState({ title: "", sections: [] });
   const [error, setError] = useState(null);
+
+  const isPTSD = level === "level1";
 
   // 🔊 SPEAK
   const speak = (text) => {
@@ -24,52 +27,122 @@ export default function SafeContent() {
     speechSynthesis.cancel();
   };
 
-  // 🔥 ANALYZE
+  // 🔥 ANALYZE (STREAMING)
   const handleAnalyze = async () => {
     if (!url.trim()) return;
 
     setLoading(true);
-    setResult(null);
+    setResult({ title: "", sections: [] });
     setError(null);
+    setStatus("מתחיל ניתוח...");
 
     try {
       const response = await fetch("http://localhost:8000/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim(), level }),
+        body: JSON.stringify({ url: url.trim(), disability: level }),
       });
 
-      if (!response.ok) throw new Error("Request failed");
+      if (!response.ok) throw new Error("הקשר עם השרת נכשל");
 
-      const data = await response.json();
-      setResult(data);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      // 🔊 AUTO READ
-      const fullText = [
-        data.title,
-        ...(data.sections?.map(s => `${s.subtitle || ""} ${s.content}`) || [])
-      ].join(". ");
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
 
-      speak(fullText);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          try {
+            const chunk = JSON.parse(line);
+
+            // 🔹 STATUS
+            if (chunk.type === "status") {
+              setStatus(chunk.message);
+            }
+
+            // 🔹 STREAM DATA
+            if (chunk.type === "data") {
+              setResult((prev) => {
+                const newSections = [...prev.sections];
+                const incoming = chunk.chunk.sections || [];
+
+                incoming.forEach((section, i) => {
+                  if (newSections[i]) {
+                    newSections[i] = {
+                      subtitle: section.subtitle || newSections[i].subtitle,
+                      content: section.content || newSections[i].content,
+                    };
+                  } else {
+                    newSections[i] = {
+                      subtitle: section.subtitle || "",
+                      content: section.content || "",
+                    };
+                  }
+                });
+
+                return {
+                  title: chunk.chunk.title || prev.title,
+                  sections: newSections,
+                };
+              });
+            }
+
+            // 🔹 END
+            if (chunk.type === "end") {
+              setLoading(false);
+              setStatus("הניתוח הושלם");
+
+              // 🔊 AUTO SPEAK
+              setTimeout(() => {
+                const fullText = [
+                  result.title,
+                  ...result.sections.map(
+                    (s) => `${s.subtitle || ""} ${s.content}`
+                  ),
+                ].join(". ");
+
+                speak(fullText);
+              }, 300);
+            }
+
+            // 🔹 ERROR
+            if (chunk.type === "error") {
+              throw new Error(chunk.message);
+            }
+
+          } catch (e) {
+            console.error("Parse error:", e);
+          }
+        }
+      }
 
     } catch (err) {
-      setError("שגיאה בניתוח הקישור. נסה שוב.");
-    } finally {
+      console.error("Request error:", err);
+      setError(err.message);
       setLoading(false);
+      setStatus("");
     }
   };
 
   return (
-    <div dir="rtl" className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 text-right">
+    <div dir="rtl" className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200">
 
       {/* NAVBAR */}
-      <header className="fixed top-0 w-full backdrop-blur-xl bg-white/70 border-b border-slate-200 z-50 shadow-sm">
+      <header className="fixed top-0 w-full backdrop-blur-xl bg-white/70 border-b z-50 shadow-sm">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <h1 className="text-xl font-extrabold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
             SafeContent
           </h1>
 
-          <div className="flex gap-2 bg-white/60 p-1 rounded-full shadow-inner">
+          <div className="flex gap-2 bg-white/60 p-1 rounded-full">
             {["level1", "level2"].map((m) => (
               <button
                 key={m}
@@ -91,37 +164,46 @@ export default function SafeContent() {
       <main className="pt-28 pb-16 px-4 flex justify-center">
         <div className="w-full max-w-2xl">
 
-          {/* HERO */}
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-extrabold text-slate-800 mb-3">
-              ניתוח תוכן בטוח
-            </h2>
-          </div>
-
           {/* INPUT */}
           <div className="flex gap-3 mb-10">
             <input
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="הכנס קישור..."
-              className="flex-1 px-5 py-4 rounded-2xl bg-white border"
+              onKeyDown={(e) => e.key === "Enter" && !loading && handleAnalyze()}
+              placeholder="הכנס קישור לניתוח..."
+              className="flex-1 px-5 py-4 rounded-2xl border shadow-sm focus:ring-2 focus:ring-purple-300"
             />
 
             <button
               onClick={handleAnalyze}
               disabled={loading || !url.trim()}
-              className="px-6 py-4 bg-purple-500 text-white rounded-2xl"
+              className={`px-6 py-4 rounded-2xl font-bold ${
+                loading
+                  ? "bg-slate-200 text-slate-400"
+                  : "bg-purple-500 hover:bg-purple-600 text-white"
+              }`}
             >
               {loading ? "טוען..." : "נתח"}
             </button>
           </div>
 
+          {/* LOADING */}
+          {loading && (
+            <div className="text-center py-10 text-slate-600">
+              {status}
+            </div>
+          )}
+
           {/* ERROR */}
-          {error && <div className="text-red-500">{error}</div>}
+          {error && (
+            <div className="text-red-500 text-center mb-4">
+              {error}
+            </div>
+          )}
 
           {/* RESULT */}
-          {result && (
+          {(result.title || result.sections.length > 0) && (
             <div className="space-y-6">
 
               {/* AUDIO */}
@@ -130,7 +212,9 @@ export default function SafeContent() {
                   onClick={() => {
                     const fullText = [
                       result.title,
-                      ...(result.sections?.map(s => `${s.subtitle || ""} ${s.content}`) || [])
+                      ...result.sections.map(
+                        (s) => `${s.subtitle || ""} ${s.content}`
+                      ),
                     ].join(". ");
                     speak(fullText);
                   }}
@@ -151,13 +235,14 @@ export default function SafeContent() {
               <h3 className="text-2xl font-bold">{result.title}</h3>
 
               {/* SECTIONS */}
-              {result.sections?.map((section, i) => (
-                <div key={i}>
-                  <h4 className="font-semibold">{section.subtitle}</h4>
+              {result.sections.map((section, i) => (
+                <div key={i} className="bg-white border rounded-2xl p-6 shadow-sm">
+                  {section.subtitle && (
+                    <h4 className="font-bold mb-2">{section.subtitle}</h4>
+                  )}
                   <p>{section.content}</p>
                 </div>
               ))}
-
             </div>
           )}
 
