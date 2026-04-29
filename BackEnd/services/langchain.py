@@ -1,13 +1,18 @@
-import asyncio
+
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+
 from pydantic import BaseModel, Field
 from typing import List
+import asyncio
 import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+from ..prompts import ANXIETY_PROMPT, PTSD_PROMPT
+
 
 class Section(BaseModel):
     subtitle: str = Field(description="The subtitle of the section")
@@ -17,40 +22,10 @@ class AnalysisResult(BaseModel):
     title: str = Field(description="The overall title of the summary")
     sections: List[Section] = Field(description="List of sections containing summary details")
 
-ANXIETY_PROMPT = """
-You are an assistant helping someone with anxiety. 
-Please summarize the following webpage content in a calm, simple, and reassuring way. 
-Avoid overwhelming details and focus on the most important information.
-Format the output as a JSON object with 'title' and 'sections' (each section having 'subtitle' and 'content').
 
-Content:
-{content}
-"""
-
-PTSD_PROMPT = """
-You are an assistant helping someone with PTSD. 
-Please summarize the following webpage content. 
-Be direct, use clear structure, and provide trigger warnings if any potentially distressing content is found. 
-Ensure the summary is safe and supportive.
-Format the output as a JSON object with 'title' and 'sections' (each section having 'subtitle' and 'content').
-
-Content:
-{content}
-"""
 
 async def process_url_for_disability(content: str, disability: str):
-
     logger.info("Starting LLM pipeline")
-
-    if not content:
-        logger.warning("Empty content received")
-        return {
-            "title": "Empty Content",
-            "sections": []
-        }
-
-    logger.info(f"Content length: {len(content)}")
-
     if disability.lower() == "anxiety":
         prompt_text = ANXIETY_PROMPT
         logger.info("Selected ANXIETY prompt")
@@ -72,7 +47,7 @@ async def process_url_for_disability(content: str, disability: str):
         chain = prompt | llm | parser
 
         logger.info("Calling LLM...")
-        result = await chain.ainvoke({"content": content[:10000]})
+        result = await chain.ainvoke({"content": content})
 
         logger.info("LLM response received")
 
